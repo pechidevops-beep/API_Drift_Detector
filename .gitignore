@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment — NEVER commit real keys
+.env
+backend/.env
+frontend/.env
+
+# Build outputs
+dist/
+build/
+
+# OS & editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.suo
+*.user
+
+# Logs
+*.log
+npm-debug.log*

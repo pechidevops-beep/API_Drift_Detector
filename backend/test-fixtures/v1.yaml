@@ -1,0 +1,80 @@
+openapi: 3.0.0
+info:
+  title: Users API
+  version: "1.0"
+paths:
+  /users/{id}:
+    get:
+      summary: Get a user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A user object
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  user_name:
+                    type: string
+                  email:
+                    type: string
+                  age:
+                    type: integer
+                  status:
+                    type: string
+                    enum: [active, inactive]
+                required:
+                  - id
+                  - user_name
+                  - email
+  /users/{id}/posts:
+    get:
+      summary: Get posts by a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    title:
+                      type: string
+  /users:
+    post:
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_name:
+                  type: string
+                email:
+                  type: string
+              required:
+                - user_name
+                - email
+      responses:
+        "201":
+          description: Created
