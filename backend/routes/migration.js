@@ -222,8 +222,20 @@ router.post('/', requireAuth, async (req, res) => {
     });
   }
 
-  // 3. Validate the diff ID exists in Supabase
+  // 3. Validate the diff ID is a proper UUID before hitting the database.
+  // SECURITY: Without this, an attacker could pass path-traversal strings or
+  // probe the Supabase API with arbitrary strings. Supabase parameterizes
+  // queries, but UUID validation here is defence-in-depth and provides a
+  // clear 400 rather than a cryptic Supabase error leaking schema details.
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const { id } = req.params;
+  if (!UUID_REGEX.test(id)) {
+    return res.status(400).json({ error: 'Invalid diff ID format.' });
+  }
+
+  // 4. Fetch the diff from Supabase (server-side trusted data).
+  // The client must NOT be able to inject their own breaking-changes list
+  // into the Gemini prompt — we ONLY use data we stored ourselves.
   const { data: diffRow, error: errDiff } = await supabase
     .from('diff_runs')
     .select('diff_result')
@@ -231,8 +243,11 @@ router.post('/', requireAuth, async (req, res) => {
     .single();
 
   if (errDiff || !diffRow) {
+    // Log Supabase error server-side, never forward raw error to client
+    // (Supabase errors can reveal table names and constraint details)
+    if (errDiff) console.warn('[migration] Supabase lookup error:', errDiff.message);
     return res.status(404).json({
-      error: `Diff '${id}' not found in database. Run a comparison first.`,
+      error: 'Diff not found. Run a comparison first.',
     });
   }
 
@@ -255,26 +270,41 @@ router.post('/', requireAuth, async (req, res) => {
     globalDailyCount++; // increment before call so partial failures count against cap
     const guide  = await callGeminiWithRetry(prompt);
 
+    // SECURITY: Truncate guide to 50,000 chars before storing.
+    // Prevents unbounded DB writes from a misbehaving model response.
+    // Real guides rarely exceed 5,000 chars; 50k is very generous headroom.
+    const guideTruncated = guide.length > 50_000
+      ? guide.slice(0, 50_000) + '\n\n_[Guide truncated at 50,000 characters]_'
+      : guide;
 
-    // Persist the guide back into the database
+
     const { error: errUpdate } = await supabase
       .from('diff_runs')
-      .update({ migration_guide: guide })
+      .update({ migration_guide: guideTruncated })
       .eq('id', id);
-      
+
     if (errUpdate) {
-      console.warn(`[migration] Guide generated but failed to save to Supabase: ${errUpdate.message}`);
+      // Log Supabase error but don't fail the request — guide was generated,
+      // only persistence failed. Never forward raw Supabase error to client.
+      console.warn('[migration] Guide generated but failed to save:', errUpdate.message);
     }
 
-    return res.status(200).json({ guide });
+    return res.status(200).json({ guide: guideTruncated });
 
   } catch (err) {
-    if (err.isRateLimit) {
+    // SECURITY: Log only err.message, NEVER the full err object.
+    // The Gemini SDK error object may contain request headers which include
+    // the API key in some SDK versions. Logging the full object risks key
+    // exposure in log aggregation services (Render logs, Datadog, etc.).
+    console.error('[migration] Gemini call failed:', err.message);
+
+    // Check if it's a rate-limit error from our retry logic
+    if (err.isRateLimit || String(err.message).includes('rate') || String(err.message).includes('429')) {
       return res.status(429).json({
         error: 'Migration guide generation is temporarily rate-limited. Try again in a minute.',
       });
     }
-    // Generic failure — safe message, no internal details
+    // Generic safe error — never expose internal details to the client
     return res.status(503).json({
       error: 'Migration guide generation failed. The AI service may be temporarily unavailable.',
     });

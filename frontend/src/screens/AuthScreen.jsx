@@ -111,10 +111,12 @@ export default function AuthScreen({ onAuthSuccess }) {
 
       // Sign up returns a user with no session if email confirmation is required
       if (!isLogin && !result.data?.session) {
-        setError('Check your email for a confirmation link, then log in.');
+        setError('Account created! Check your inbox for a confirmation link, then come back and log in.');
         setTab('login');
+        setPassword('');
         return;
       }
+
 
       onAuthSuccess(result.data.session);
     } catch (err) {

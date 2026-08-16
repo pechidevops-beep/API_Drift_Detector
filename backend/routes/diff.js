@@ -65,11 +65,20 @@ function parseBufferToObject(buffer, originalName) {
 }
 
 /**
- * Parses and dereferences a spec buffer.
+ * Parses AND validates a spec buffer as a valid OpenAPI 3.x document.
+ *
+ * SECURITY FIX: Previously used SwaggerParser.dereference() which only
+ * resolves $refs but does NOT validate whether the file is a valid OpenAPI
+ * spec. dereference() accepts any JS object — an attacker could send a
+ * crafted JSON that passes the file extension check but is not an API spec.
+ * validate() does both: resolves $refs AND enforces the OpenAPI schema.
+ * This means a renamed image.jpg uploaded as spec.yaml is rejected here
+ * rather than producing garbage diff output or crashing downstream code.
  */
 async function parseSpecBuffer(buffer, originalName) {
   const parsed = parseBufferToObject(buffer, originalName);
-  return SwaggerParser.dereference(parsed);
+  // validate() throws a descriptive error if the document is not valid OpenAPI
+  return SwaggerParser.validate(parsed);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +97,15 @@ router.post('/', optionalAuth, uploadSpecPair, async (req, res) => {
       });
     }
 
-    // --- Parse + normalize ---
+    // SECURITY: Reject empty files explicitly.
+    // An empty file passes multer's fileFilter (valid extension) but causes
+    // js-yaml to return null and SwaggerParser to throw an opaque error.
+    // Catching it here gives a clear 400 instead of a 500 stack trace.
+    if (v1File.size === 0 || v2File.size === 0) {
+      return res.status(400).json({ error: 'Uploaded file is empty. Please upload a valid OpenAPI spec.' });
+    }
+
+    // --- Parse + validate (SwaggerParser.validate enforces OpenAPI schema) ---
     const [v1Api, v2Api] = await Promise.all([
       parseSpecBuffer(v1File.buffer, v1File.originalname),
       parseSpecBuffer(v2File.buffer, v2File.originalname),
@@ -181,11 +198,21 @@ router.post('/', optionalAuth, uploadSpecPair, async (req, res) => {
 
     return res.status(200).json(result);
   } catch (err) {
-    // SwaggerParser throws on invalid specs — surface a clean error message
-    if (err.name === 'SyntaxError' || err.message?.includes('is not a valid')) {
-      return res.status(422).json({ error: `Invalid OpenAPI spec: ${err.message}` });
+    // SwaggerParser.validate() throws when the file is not valid OpenAPI.
+    // Surface a clean user-friendly error — never forward err.message raw
+    // because it may contain internal file paths or schema details.
+    const isParseError = (
+      err.name === 'SyntaxError' ||
+      err.name === 'ParserException' ||
+      err.message?.toLowerCase().includes('is not a valid openapi') ||
+      err.message?.toLowerCase().includes('invalid yaml') ||
+      err.message?.toLowerCase().includes('is not valid json')
+    );
+    if (isParseError) {
+      return res.status(422).json({ error: 'Invalid or unrecognized OpenAPI spec. Upload a valid OpenAPI 3.x YAML or JSON file.' });
     }
-    console.error('[POST /api/diff] Unexpected error:', err);
+    // Log the full error server-side (never send stack trace to client)
+    console.error('[POST /api/diff] Unexpected error:', err.message);
     return res.status(500).json({ error: 'Internal server error during diff.' });
   }
 });
@@ -195,6 +222,15 @@ router.post('/', optionalAuth, uploadSpecPair, async (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/diff/:id — retrieve from Supabase
 router.get('/:id', async (req, res) => {
+  // SECURITY: Validate UUID format before querying the database.
+  // Without this check, an attacker could pass path-traversal strings or
+  // attempt to probe the DB via malformed IDs. Supabase JS client does
+  // parameterize queries, but validating at the route level is defence-in-depth.
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!UUID_REGEX.test(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid diff ID format.' });
+  }
+
   try {
     const { data, error } = await supabase
       .from('diff_runs')
