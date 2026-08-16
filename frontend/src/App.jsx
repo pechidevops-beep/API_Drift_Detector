@@ -20,6 +20,7 @@ import DiffScreen     from './screens/DiffScreen';
 import TimelineScreen from './screens/TimelineScreen';
 import AuthScreen     from './screens/AuthScreen';
 import { getDiffById } from './api/client';
+import logo           from './assets/logo.png';
 
 // ---------------------------------------------------------------------------
 // AppHeader
@@ -27,9 +28,8 @@ import { getDiffById } from './api/client';
 function AppHeader({ screen, user, onNav, onSignOut }) {
   return (
     <header className="app-header">
-      <div className="app-logo" onClick={() => onNav('upload')} style={{ cursor: 'pointer' }}>
-        <div className="app-logo-signal" />
-        Drift Detector
+      <div className="app-logo" onClick={() => onNav('upload')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+        <img src={logo} alt="API Drift Detector" style={{ height: '32px', borderRadius: '2px' }} />
       </div>
       <nav className="nav-links">
         <button

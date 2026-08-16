@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import logo from '../assets/logo.png';
 
 // ---------------------------------------------------------------------------
 // Map Supabase error messages to friendly copy
@@ -130,9 +131,8 @@ export default function AuthScreen({ onAuthSuccess }) {
     <div className="auth-screen">
       <div className="auth-card">
         {/* Logomark */}
-        <div className="auth-logo">
-          <div className="auth-logo-dot" />
-          <span className="auth-logo-text">Drift Detector</span>
+        <div className="auth-logo" style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+          <img src={logo} alt="API Drift Detector" style={{ height: '48px', borderRadius: '4px' }} />
         </div>
 
         <h1 className="auth-title">{isLogin ? 'Welcome back' : 'Create account'}</h1>
